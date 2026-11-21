@@ -3,11 +3,15 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig(() => {
-  const rawBase = process.env.VITE_BASE_PATH || '/';
-  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+  const rawBase = process.env.VITE_BASE_PATH || './';
+  const base = rawBase === './' ? './' : rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+  const manifestBase = rawBase === './' ? './' : base;
 
   return {
     base,
@@ -24,7 +28,7 @@ export default defineConfig(() => {
           'pwa-maskable-512x512.png',
         ],
         manifest: {
-          id: base,
+          id: manifestBase,
           name: 'Christmas Log',
           short_name: 'Xmas Log',
           description:
@@ -32,23 +36,23 @@ export default defineConfig(() => {
           theme_color: '#C61D2B',
           background_color: '#FFF9F2',
           display: 'standalone',
-          start_url: base,
-          scope: base,
+          start_url: manifestBase,
+          scope: manifestBase,
           icons: [
             {
-              src: `${base}pwa-192x192.png`,
+              src: 'pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: `${base}pwa-512x512.png`,
+              src: 'pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: `${base}pwa-maskable-512x512.png`,
+              src: 'pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -57,6 +61,7 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -108,6 +113,10 @@ export default defineConfig(() => {
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, { recursive: true, force: true });
+          }
+          // Add .nojekyll to dist/ so GitHub Pages serves all files without Jekyll processing
+          if (fs.existsSync(distDir)) {
+            fs.writeFileSync(path.resolve(distDir, '.nojekyll'), '');
           }
         },
       },
