@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Fredoka", "Plus Jakarta Sans", sans-serif;
+  --font-display: "Fredoka", "Plus Jakarta Sans", sans-serif;
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #FFF9F2;
+    color: #1D2B24;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #FFF9F2;
+    background-image:
+      radial-gradient(ellipse 85% 40% at 50% 0%, rgba(248, 197, 55, 0.16), transparent 65%),
+      radial-gradient(circle at 8% 82%, rgba(209, 32, 47, 0.06), transparent 45%),
+      radial-gradient(circle at 92% 78%, rgba(21, 122, 75, 0.07), transparent 45%);
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cheerful classic candy-cane diagonal ribbon trim */
+.candy-cane-trim {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #D1202F 0px,
+    #D1202F 10px,
+    #FFFFFF 10px,
+    #FFFFFF 20px,
+    #157A4B 20px,
+    #157A4B 23px,
+    #FFFFFF 23px,
+    #FFFFFF 27px
+  );
+}
+
+/* Gentle compositor-only snowfall animation */
+@keyframes snowfall-drift {
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.72;
+  }
+  88% {
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate3d(26px, 104vh, 0) rotate(180deg);
+    opacity: 0;
+  }
+}
+
+.snowflake-drift {
+  animation-name: snowfall-drift;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform, opacity;
+}
+
+/* Subtle warm twinkle for header fairy lights (opacity only) */
+@keyframes bulb-twinkle {
+  0%, 100% {
+    opacity: 0.98;
+  }
+  50% {
+    opacity: 0.58;
+  }
+}
+
+.fairy-bulb-a {
+  animation: bulb-twinkle 2.6s ease-in-out infinite;
+}
+
+.fairy-bulb-b {
+  animation: bulb-twinkle 2.6s ease-in-out 1.3s infinite;
+}
+
+/* Hide horizontal scrollbar on recipient filter strip */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snowflake-drift,
+  .fairy-bulb-a,
+  .fairy-bulb-b {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

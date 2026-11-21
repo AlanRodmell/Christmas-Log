@@ -1,0 +1,6 @@
+{
+  "name": "Noel Ledger",
+  "description": "Classic Christmas gift list and real-time budget tracker organized by recipient with swipe actions, offline storage, and expense insights.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
