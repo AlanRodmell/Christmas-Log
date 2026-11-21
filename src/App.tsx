@@ -4,8 +4,19 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { AlertTriangle, Check, Gift, Pencil, PieChart, Plus, Search, Users, X } from 'lucide-react';
-import { AppView, ChristmasLedgerData, GiftEntry, SortMode } from './types';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Gift,
+  Pencil,
+  PieChart,
+  Plus,
+  Search,
+  Users,
+  X,
+} from 'lucide-react';
+import { AppView, ChristmasLedgerData, GiftEntry, RecipientSortMode, SortMode } from './types';
 import {
   STORAGE_KEY,
   createId,
@@ -15,6 +26,7 @@ import {
   getStarterData,
   loadLedgerData,
   saveLedgerData,
+  sortRecipientsList,
 } from './storage';
 import { BudgetHeaderCard } from './components/BudgetHeaderCard';
 import { SwipeableGiftRow } from './components/SwipeableGiftRow';
@@ -37,7 +49,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
 
-  // Inline budget editing directly on a recipient card in Gift List
+  // Home screen expandable summary rows per person (collapsed by default for clean overview)
+  const [expandedRecipientIds, setExpandedRecipientIds] = useState<Record<string, boolean>>({});
+
+  // Inline budget editing directly on an expanded recipient card in Gift List
   const [editingBudgetRecipientId, setEditingBudgetRecipientId] = useState<string | null>(null);
   const [inlineBudgetDraft, setInlineBudgetDraft] = useState('');
 
@@ -112,8 +127,16 @@ export default function App() {
       giftCount: ledger.gifts.length,
       recipientCount: ledger.recipients.length,
       overBudgetRecipientsCount,
+      spendByRecipient,
     };
   }, [ledger.gifts, ledger.recipients]);
+
+  const recipientSort: RecipientSortMode = ledger.recipientSort ?? 'alpha-asc';
+
+  const orderedRecipients = useMemo(
+    () => sortRecipientsList(ledger.recipients, recipientSort, totals.spendByRecipient),
+    [ledger.recipients, recipientSort, totals.spendByRecipient]
+  );
 
   const recipientMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -123,9 +146,13 @@ export default function App() {
     return map;
   }, [ledger.recipients]);
 
+  // Stable bauble colour per recipient regardless of sort or manual reordering
   const recipientIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    ledger.recipients.forEach((r, idx) => map.set(r.id, idx));
+    const byCreation = [...ledger.recipients].sort(
+      (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+    );
+    byCreation.forEach((r, idx) => map.set(r.id, idx));
     return map;
   }, [ledger.recipients]);
 
@@ -151,6 +178,16 @@ export default function App() {
       purchased: boolean;
     }) => {
       const now = Date.now();
+      const matchedExisting = payload.newRecipientName
+        ? ledger.recipients.find(
+            (r) => r.name.toLowerCase() === payload.newRecipientName!.toLowerCase()
+          )
+        : undefined;
+      const pregeneratedNewId =
+        payload.newRecipientName && !matchedExisting ? createId('rec') : undefined;
+      const expandTargetId =
+        payload.recipientId ?? matchedExisting?.id ?? pregeneratedNewId;
+
       setLedger((prev) => {
         let recipients = prev.recipients;
         let targetRecipientId = payload.recipientId;
@@ -163,7 +200,7 @@ export default function App() {
             targetRecipientId = existing.id;
           } else {
             const created = {
-              id: createId('rec'),
+              id: pregeneratedNewId ?? createId('rec'),
               name: payload.newRecipientName,
               budget: payload.newRecipientBudget ?? 0,
               createdAt: now,
@@ -207,8 +244,12 @@ export default function App() {
           gifts: [newGift, ...prev.gifts],
         };
       });
+
+      if (expandTargetId) {
+        setExpandedRecipientIds((prev) => ({ ...prev, [expandTargetId]: true }));
+      }
     },
-    []
+    [ledger.recipients]
   );
 
   // CRUD: Toggle Purchased boolean
@@ -288,12 +329,61 @@ export default function App() {
     [selectedRecipientId]
   );
 
+  // Organise & Sort People
+  const handleChangeRecipientSort = useCallback((mode: RecipientSortMode) => {
+    setLedger((prev) => ({ ...prev, recipientSort: mode }));
+  }, []);
+
+  const handleSortRecipientsAlphabetically = useCallback(() => {
+    setLedger((prev) => ({
+      ...prev,
+      recipients: sortRecipientsList(prev.recipients, 'alpha-asc'),
+      recipientSort: 'alpha-asc',
+    }));
+  }, []);
+
+  const handleMoveRecipient = useCallback((id: string, direction: 'up' | 'down') => {
+    setLedger((prev) => {
+      const spendMap = new Map<string, number>();
+      for (const g of prev.gifts) {
+        spendMap.set(g.recipientId, (spendMap.get(g.recipientId) ?? 0) + g.estimatedCost);
+      }
+      const currentOrdered = sortRecipientsList(
+        prev.recipients,
+        prev.recipientSort ?? 'alpha-asc',
+        spendMap
+      );
+      const index = currentOrdered.findIndex((r) => r.id === id);
+      if (index === -1) return prev;
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= currentOrdered.length) return prev;
+
+      const reordered = [...currentOrdered];
+      [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+
+      return {
+        ...prev,
+        recipients: reordered,
+        recipientSort: 'custom',
+      };
+    });
+  }, []);
+
+  const toggleRecipientExpanded = useCallback((recipientId: string) => {
+    setExpandedRecipientIds((prev) => ({
+      ...prev,
+      [recipientId]: !prev[recipientId],
+    }));
+    setOpenSwipeId(null);
+  }, []);
+
   // Maintenance Actions
   const handleResetSampleData = useCallback(() => {
     setLedger(getStarterData());
     setSelectedRecipientId('all');
     setPurchaseFilter('all');
     setSearchQuery('');
+    setExpandedRecipientIds({});
   }, []);
 
   const handleClearAllGifts = useCallback(() => {
@@ -330,6 +420,7 @@ export default function App() {
     setSelectedRecipientId(recipientId);
     setPurchaseFilter('all');
     setSearchQuery('');
+    setExpandedRecipientIds((prev) => ({ ...prev, [recipientId]: true }));
     setActiveView('gifts');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -369,8 +460,8 @@ export default function App() {
 
     const visibleRecipients =
       selectedRecipientId === 'all'
-        ? ledger.recipients
-        : ledger.recipients.filter((r) => r.id === selectedRecipientId);
+        ? orderedRecipients
+        : orderedRecipients.filter((r) => r.id === selectedRecipientId);
 
     return visibleRecipients
       .map((recipient) => {
@@ -423,28 +514,56 @@ export default function App() {
         if (query || purchaseFilter !== 'all') return section.gifts.length > 0;
         return true;
       });
-  }, [ledger.recipients, ledger.gifts, selectedRecipientId, purchaseFilter, searchQuery, sortMode, recipientIndexMap]);
+  }, [
+    orderedRecipients,
+    ledger.gifts,
+    selectedRecipientId,
+    purchaseFilter,
+    searchQuery,
+    sortMode,
+    recipientIndexMap,
+  ]);
 
   const sidebarRecipientTotals = useMemo(() => {
-    return ledger.recipients
-      .map((r, idx) => {
-        const items = ledger.gifts.filter((g) => g.recipientId === r.id);
-        const total = items.reduce((s, g) => s + g.estimatedCost, 0);
-        const remaining = r.budget - total;
-        return {
-          recipient: r,
-          seal: getRecipientSealColor(idx),
-          count: items.length,
-          boughtCount: items.filter((g) => g.purchased).length,
-          total,
-          remaining,
-          isOver: r.budget > 0 && remaining < 0,
-        };
-      })
-      .sort((a, b) => b.total - a.total || a.recipient.name.localeCompare(b.recipient.name));
-  }, [ledger.recipients, ledger.gifts]);
+    return orderedRecipients.map((r, idx) => {
+      const items = ledger.gifts.filter((g) => g.recipientId === r.id);
+      const total = items.reduce((s, g) => s + g.estimatedCost, 0);
+      const remaining = r.budget - total;
+      return {
+        recipient: r,
+        seal: getRecipientSealColor(recipientIndexMap.get(r.id) ?? idx),
+        count: items.length,
+        boughtCount: items.filter((g) => g.purchased).length,
+        total,
+        remaining,
+        isOver: r.budget > 0 && remaining < 0,
+      };
+    });
+  }, [orderedRecipients, ledger.gifts, recipientIndexMap]);
 
-  const totalVisibleGifts = groupedRecipientSections.reduce((s, sec) => s + sec.gifts.length, 0);
+  const isForcedExpanded =
+    Boolean(searchQuery.trim()) || purchaseFilter !== 'all' || selectedRecipientId !== 'all';
+
+  const allVisibleExpanded =
+    groupedRecipientSections.length > 0 &&
+    groupedRecipientSections.every((sec) => Boolean(expandedRecipientIds[sec.recipient.id]));
+
+  const anyVisibleExpanded =
+    isForcedExpanded ||
+    groupedRecipientSections.some((sec) => Boolean(expandedRecipientIds[sec.recipient.id]));
+
+  const handleToggleAllExpanded = () => {
+    if (allVisibleExpanded) {
+      setExpandedRecipientIds({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const sec of groupedRecipientSections) {
+        next[sec.recipient.id] = true;
+      }
+      setExpandedRecipientIds(next);
+    }
+    setOpenSwipeId(null);
+  };
 
   return (
     <div className="relative min-h-screen flex flex-col text-[#1D2B24]">
@@ -560,7 +679,7 @@ export default function App() {
                   >
                     All ({ledger.gifts.length})
                   </button>
-                  {ledger.recipients.map((recipient) => {
+                  {orderedRecipients.map((recipient) => {
                     const isSelected = selectedRecipientId === recipient.id;
                     const count = ledger.gifts.filter((g) => g.recipientId === recipient.id).length;
                     return (
@@ -590,7 +709,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Search + Purchase Status Filter + Sort Row */}
+                {/* Search + Purchase Status Filter */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                   <div className="relative flex-1 min-w-0">
                     <Search
@@ -601,8 +720,8 @@ export default function App() {
                       type="search"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search gifts or recipients..."
-                      aria-label="Search gifts or recipients"
+                      placeholder="Search gifts or people..."
+                      aria-label="Search gifts or people"
                       className="w-full min-h-[44px] pl-10 pr-9 py-2 rounded-xl bg-white border border-[#F0DFC8] text-sm text-[#1D2B24] placeholder:text-[#968672] focus:outline-none focus:border-[#157A4B] focus:ring-2 focus:ring-[#157A4B]/15"
                     />
                     {searchQuery && (
@@ -617,54 +736,83 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div
-                      role="group"
-                      aria-label="Filter by purchase status"
-                      className="inline-flex items-center p-0.5 rounded-xl bg-[#F5E9D9] border border-[#EAD8C0]"
+                  <div
+                    role="group"
+                    aria-label="Filter by purchase status"
+                    className="inline-flex items-center p-0.5 rounded-xl bg-[#F5E9D9] border border-[#EAD8C0] self-start sm:self-auto shrink-0"
+                  >
+                    {(
+                      [
+                        { id: 'all', label: 'All' },
+                        { id: 'unpurchased', label: 'To Buy' },
+                        { id: 'purchased', label: 'Bought' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setPurchaseFilter(opt.id)}
+                        aria-pressed={purchaseFilter === opt.id}
+                        className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                          purchaseFilter === opt.id
+                            ? 'bg-white text-[#C61D2B] shadow-xs'
+                            : 'text-[#6A5A48] hover:text-[#1D2B24]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* People Sort + Gift Sort + Expand/Collapse Row */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="Sort people"
+                      value={recipientSort}
+                      onChange={(e) =>
+                        handleChangeRecipientSort(e.target.value as RecipientSortMode)
+                      }
+                      className="min-h-[40px] px-3 py-1.5 rounded-xl bg-white border border-[#F0DFC8] text-xs font-semibold text-[#1D2B24] focus:outline-none focus:border-[#157A4B]"
                     >
-                      {(
-                        [
-                          { id: 'all', label: 'All' },
-                          { id: 'unpurchased', label: 'To Buy' },
-                          { id: 'purchased', label: 'Bought' },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => setPurchaseFilter(opt.id)}
-                          aria-pressed={purchaseFilter === opt.id}
-                          className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-                            purchaseFilter === opt.id
-                              ? 'bg-white text-[#C61D2B] shadow-xs'
-                              : 'text-[#6A5A48] hover:text-[#1D2B24]'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
+                      <option value="alpha-asc">People: A–Z</option>
+                      <option value="alpha-desc">People: Z–A</option>
+                      <option value="custom">People: Custom order</option>
+                      <option value="spend-desc">People: Most spent</option>
+                    </select>
 
                     <select
                       aria-label="Sort gifts"
                       value={sortMode}
                       onChange={(e) => setSortMode(e.target.value as SortMode)}
-                      className="min-h-[44px] px-3 py-2 rounded-xl bg-white border border-[#F0DFC8] text-xs font-semibold text-[#455A4F] focus:outline-none focus:border-[#157A4B] shrink-0"
+                      className="min-h-[40px] px-3 py-1.5 rounded-xl bg-white border border-[#F0DFC8] text-xs font-semibold text-[#455A4F] focus:outline-none focus:border-[#157A4B]"
                     >
-                      <option value="recent">Newest first</option>
-                      <option value="cost-desc">Highest cost</option>
-                      <option value="cost-asc">Lowest cost</option>
-                      <option value="unbought">To buy first</option>
+                      <option value="recent">Gifts: Newest</option>
+                      <option value="cost-desc">Gifts: Highest £</option>
+                      <option value="cost-asc">Gifts: Lowest £</option>
+                      <option value="unbought">Gifts: To buy first</option>
                     </select>
                   </div>
+
+                  {!isForcedExpanded && groupedRecipientSections.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleToggleAllExpanded}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-[#157A4B] hover:text-[#C61D2B] hover:bg-[#FFF6EC] transition-colors whitespace-nowrap"
+                    >
+                      {allVisibleExpanded ? 'Collapse all' : 'Expand all'}
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Quiet Interaction Hint */}
-              {totalVisibleGifts > 0 && (
+              {groupedRecipientSections.length > 0 && (
                 <p className="text-xs text-[#7A6855] px-0.5">
-                  Tap any budget to edit · Tick gifts bought · Swipe right to edit · Swipe left to delete
+                  {anyVisibleExpanded
+                    ? 'Tap a person to collapse · Tick gifts bought · Swipe gifts right to edit or left to delete'
+                    : 'Tap any person below to expand their Christmas gifts'}
                 </p>
               )}
 
@@ -706,7 +854,7 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-5">
+                <div className="space-y-3">
                   {groupedRecipientSections.map(
                     ({
                       recipient,
@@ -721,17 +869,37 @@ export default function App() {
                       totalCount,
                       allWrappedUp,
                     }) => {
+                      const isExpanded =
+                        isForcedExpanded || Boolean(expandedRecipientIds[recipient.id]);
                       const isEditingThisBudget = editingBudgetRecipientId === recipient.id;
+                      const panelId = `recipient-gifts-panel-${recipient.id}`;
 
                       return (
                         <section
                           key={recipient.id}
-                          aria-label={`Gifts and budget for ${recipient.name}`}
-                          className="rounded-3xl bg-white border border-[#F0DFC8] shadow-sm shadow-[#A67B46]/8 overflow-hidden"
+                          aria-label={`Summary and gifts for ${recipient.name}`}
+                          className={`rounded-2xl bg-white border transition-colors overflow-hidden ${
+                            isExpanded
+                              ? 'border-[#DFC6A6] shadow-sm shadow-[#A67B46]/10'
+                              : 'border-[#F0DFC8] hover:border-[#DEC5A3] shadow-xs'
+                          }`}
                         >
-                          {/* Cheerful Festive Recipient Header */}
-                          <div className="px-4 sm:px-5 pt-4 pb-3.5 bg-[#FFF6EC] border-b border-[#F3E5D3] space-y-3">
-                            <div className="flex items-start sm:items-center justify-between gap-3">
+                          {/* Expandable Per-Person Summary Row */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isForcedExpanded) return;
+                              toggleRecipientExpanded(recipient.id);
+                            }}
+                            aria-expanded={isExpanded}
+                            aria-controls={panelId}
+                            className={`w-full text-left px-4 sm:px-5 py-3.5 transition-colors focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-[#157A4B] ${
+                              isExpanded
+                                ? 'bg-[#FFF6EC] border-b border-[#F3E5D3]'
+                                : 'bg-white hover:bg-[#FFFBF5]'
+                            } ${isForcedExpanded ? 'cursor-default' : 'cursor-pointer'}`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 <RecipientBauble
                                   name={recipient.name}
@@ -740,7 +908,7 @@ export default function App() {
                                 />
                                 <div className="min-w-0">
                                   <div className="flex items-baseline gap-2">
-                                    <h2 className="font-serif text-lg font-bold text-[#1D2B24] truncate">
+                                    <h2 className="font-serif text-[17px] font-bold text-[#1D2B24] truncate">
                                       {recipient.name}
                                     </h2>
                                     {recipient.note && (
@@ -749,8 +917,10 @@ export default function App() {
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-xs text-[#6B7A71] tabular-nums">
-                                    {allWrappedUp ? (
+                                  <p className="mt-0.5 text-xs text-[#6B7A71] tabular-nums">
+                                    {totalCount === 0 ? (
+                                      <span>No gifts yet</span>
+                                    ) : allWrappedUp ? (
                                       <span className="font-semibold text-[#157A4B]">
                                         All wrapped up! ({boughtCount}/{totalCount})
                                       </span>
@@ -776,95 +946,33 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Spend / Budget tap-to-edit + Log Gift button */}
-                              <div className="flex items-center gap-2 shrink-0">
-                                {!isEditingThisBudget && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      startInlineBudgetEdit(recipient.id, recipient.budget)
-                                    }
-                                    aria-label={`Edit ${recipient.name}'s budget, currently ${formatCurrency(recipient.budget)}`}
-                                    className="group/budget inline-flex items-center gap-1.5 min-h-[40px] px-2.5 py-1 rounded-xl hover:bg-[#F7E8D4] transition-colors text-right"
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                <div className="text-right tabular-nums">
+                                  <span
+                                    className={`block text-[15px] font-bold leading-tight ${
+                                      isOverBudget ? 'text-[#C61D2B]' : 'text-[#157A4B]'
+                                    }`}
                                   >
-                                    <div className="tabular-nums">
-                                      <span
-                                        className={`text-sm sm:text-[15px] font-bold ${
-                                          isOverBudget ? 'text-[#C61D2B]' : 'text-[#157A4B]'
-                                        }`}
-                                      >
-                                        {formatCurrency(allPersonSpend)}
-                                      </span>
-                                      <span className="text-xs text-[#7A6855]">
-                                        {' '}
-                                        / {formatCurrencySmart(recipient.budget)}
-                                      </span>
-                                    </div>
-                                    <Pencil
-                                      className="w-3.5 h-3.5 text-[#9B8770] group-hover/budget:text-[#157A4B] shrink-0"
-                                      aria-hidden="true"
-                                    />
-                                  </button>
+                                    {formatCurrency(allPersonSpend)}
+                                  </span>
+                                  <span className="block text-[11px] text-[#7A6855] mt-0.5">
+                                    of {formatCurrencySmart(recipient.budget)}
+                                  </span>
+                                </div>
+                                {!isForcedExpanded && (
+                                  <ChevronDown
+                                    className={`w-5 h-5 text-[#9B8770] transition-transform duration-200 shrink-0 ${
+                                      isExpanded ? 'rotate-180 text-[#C61D2B]' : ''
+                                    }`}
+                                    aria-hidden="true"
+                                  />
                                 )}
-
-                                <button
-                                  type="button"
-                                  onClick={() => openAddGiftModal(recipient.id)}
-                                  aria-label={`Log gift for ${recipient.name}`}
-                                  className="inline-flex items-center gap-1 min-h-[40px] px-3 py-1.5 rounded-xl bg-[#C61D2B] hover:bg-[#A61723] text-xs font-semibold text-white transition-colors whitespace-nowrap shadow-xs focus-visible:outline-2 focus-visible:outline-[#C61D2B]"
-                                >
-                                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
-                                  <span className="hidden sm:inline">Log Gift</span>
-                                </button>
                               </div>
                             </div>
 
-                            {/* Inline Budget Editor */}
-                            {isEditingThisBudget && (
-                              <form
-                                onSubmit={(e) => commitInlineBudgetEdit(e, recipient.id)}
-                                className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-white border border-[#E5D3BC]"
-                              >
-                                <label
-                                  htmlFor={`inline-budget-${recipient.id}`}
-                                  className="text-xs font-semibold text-[#1D2B24] whitespace-nowrap"
-                                >
-                                  {recipient.name}&apos;s budget (£)
-                                </label>
-                                <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
-                                  <input
-                                    id={`inline-budget-${recipient.id}`}
-                                    type="number"
-                                    inputMode="decimal"
-                                    step="0.01"
-                                    min="0"
-                                    value={inlineBudgetDraft}
-                                    onChange={(e) => setInlineBudgetDraft(e.target.value)}
-                                    autoFocus
-                                    className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-[#157A4B] bg-white text-sm font-semibold text-[#1D2B24] tabular-nums focus:outline-none"
-                                  />
-                                  <button
-                                    type="submit"
-                                    aria-label="Save budget"
-                                    className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-lg bg-[#157A4B] text-white hover:bg-[#10623B]"
-                                  >
-                                    <Check className="w-4 h-4" aria-hidden="true" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label="Cancel editing budget"
-                                    onClick={() => setEditingBudgetRecipientId(null)}
-                                    className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-lg border border-[#E5D3BC] text-[#5A6D62] hover:bg-[#FFF6EC]"
-                                  >
-                                    <X className="w-4 h-4" aria-hidden="true" />
-                                  </button>
-                                </div>
-                              </form>
-                            )}
-
-                            {/* Per-Recipient Individual Budget Progress Bar */}
+                            {/* Slim Per-Person Budget Progress Bar */}
                             <div
-                              className="relative h-2.5 w-full rounded-full bg-[#EFE2D0] overflow-hidden"
+                              className="mt-3 relative h-2 w-full rounded-full bg-[#EFE2D0] overflow-hidden"
                               role="progressbar"
                               aria-valuenow={Math.round(budgetPct)}
                               aria-valuemin={0}
@@ -885,37 +993,113 @@ export default function App() {
                                 />
                               )}
                             </div>
-                          </div>
+                          </button>
 
-                          {/* Gift Rows */}
-                          {gifts.length === 0 ? (
-                            <div className="px-5 py-5 flex items-center justify-between gap-4">
-                              <p className="text-sm text-[#7A6855]">
-                                No gifts logged for {recipient.name} yet.
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => openAddGiftModal(recipient.id)}
-                                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#157A4B]/10 hover:bg-[#157A4B]/18 text-xs font-semibold text-[#157A4B] transition-colors whitespace-nowrap"
-                              >
-                                Log Gift
-                              </button>
-                            </div>
-                          ) : (
-                            <div>
-                              {gifts.map((gift, index) => (
-                                <SwipeableGiftRow
-                                  key={gift.id}
-                                  gift={gift}
-                                  recipientName={recipientMap.get(gift.recipientId)}
-                                  isOpen={openSwipeId === gift.id}
-                                  onOpenChange={setOpenSwipeId}
-                                  onTogglePurchased={handleTogglePurchased}
-                                  onEdit={openEditGiftModal}
-                                  onDelete={handleDeleteGift}
-                                  isLast={index === gifts.length - 1}
-                                />
-                              ))}
+                          {/* Expanded Gifts & Quick Budget/Log Actions */}
+                          {isExpanded && (
+                            <div id={panelId}>
+                              {/* Inline Quick Actions Bar */}
+                              <div className="px-4 sm:px-5 py-2.5 bg-[#FFFBF5] border-b border-[#F4E9DA] space-y-2.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      isEditingThisBudget
+                                        ? setEditingBudgetRecipientId(null)
+                                        : startInlineBudgetEdit(recipient.id, recipient.budget)
+                                    }
+                                    className="inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1 rounded-xl text-xs font-semibold text-[#5A6D62] hover:text-[#157A4B] hover:bg-[#F3E5D3]/60 transition-colors"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                                    <span>Edit Budget ({formatCurrencySmart(recipient.budget)})</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddGiftModal(recipient.id)}
+                                    aria-label={`Log gift for ${recipient.name}`}
+                                    className="inline-flex items-center gap-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-[#C61D2B] hover:bg-[#A61723] text-xs font-semibold text-white transition-colors whitespace-nowrap shadow-xs focus-visible:outline-2 focus-visible:outline-[#C61D2B]"
+                                  >
+                                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
+                                    <span>Log Gift</span>
+                                  </button>
+                                </div>
+
+                                {/* Inline Budget Editor */}
+                                {isEditingThisBudget && (
+                                  <form
+                                    onSubmit={(e) => commitInlineBudgetEdit(e, recipient.id)}
+                                    className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-white border border-[#E5D3BC]"
+                                  >
+                                    <label
+                                      htmlFor={`inline-budget-${recipient.id}`}
+                                      className="text-xs font-semibold text-[#1D2B24] whitespace-nowrap"
+                                    >
+                                      {recipient.name}&apos;s budget (£)
+                                    </label>
+                                    <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
+                                      <input
+                                        id={`inline-budget-${recipient.id}`}
+                                        type="number"
+                                        inputMode="decimal"
+                                        step="0.01"
+                                        min="0"
+                                        value={inlineBudgetDraft}
+                                        onChange={(e) => setInlineBudgetDraft(e.target.value)}
+                                        autoFocus
+                                        className="w-full min-h-[40px] px-3 py-1.5 rounded-lg border border-[#157A4B] bg-white text-sm font-semibold text-[#1D2B24] tabular-nums focus:outline-none"
+                                      />
+                                      <button
+                                        type="submit"
+                                        aria-label="Save budget"
+                                        className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-lg bg-[#157A4B] text-white hover:bg-[#10623B]"
+                                      >
+                                        <Check className="w-4 h-4" aria-hidden="true" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label="Cancel editing budget"
+                                        onClick={() => setEditingBudgetRecipientId(null)}
+                                        className="inline-flex items-center justify-center min-h-[40px] min-w-[40px] rounded-lg border border-[#E5D3BC] text-[#5A6D62] hover:bg-[#FFF6EC]"
+                                      >
+                                        <X className="w-4 h-4" aria-hidden="true" />
+                                      </button>
+                                    </div>
+                                  </form>
+                                )}
+                              </div>
+
+                              {/* Gift Rows */}
+                              {gifts.length === 0 ? (
+                                <div className="px-5 py-5 flex items-center justify-between gap-4">
+                                  <p className="text-sm text-[#7A6855]">
+                                    No gifts logged for {recipient.name} yet.
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddGiftModal(recipient.id)}
+                                    className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#157A4B]/10 hover:bg-[#157A4B]/18 text-xs font-semibold text-[#157A4B] transition-colors whitespace-nowrap"
+                                  >
+                                    Log Gift
+                                  </button>
+                                </div>
+                              ) : (
+                                <div>
+                                  {gifts.map((gift, index) => (
+                                    <SwipeableGiftRow
+                                      key={gift.id}
+                                      gift={gift}
+                                      recipientName={recipientMap.get(gift.recipientId)}
+                                      isOpen={openSwipeId === gift.id}
+                                      onOpenChange={setOpenSwipeId}
+                                      onTogglePurchased={handleTogglePurchased}
+                                      onEdit={openEditGiftModal}
+                                      onDelete={handleDeleteGift}
+                                      isLast={index === gifts.length - 1}
+                                    />
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
                         </section>
@@ -1032,8 +1216,13 @@ export default function App() {
 
         {activeView === 'recipients' && (
           <RecipientsView
-            recipients={ledger.recipients}
+            recipients={orderedRecipients}
+            recipientIndexMap={recipientIndexMap}
             gifts={ledger.gifts}
+            recipientSort={recipientSort}
+            onChangeRecipientSort={handleChangeRecipientSort}
+            onSortRecipientsAlphabetically={handleSortRecipientsAlphabetically}
+            onMoveRecipient={handleMoveRecipient}
             onAddRecipient={handleAddRecipient}
             onUpdateRecipient={handleUpdateRecipient}
             onDeleteRecipient={handleDeleteRecipient}
@@ -1082,7 +1271,7 @@ export default function App() {
         isOpen={isGiftModalOpen}
         editingGift={editingGift}
         defaultRecipientId={modalDefaultRecipientId}
-        recipients={ledger.recipients}
+        recipients={orderedRecipients}
         gifts={ledger.gifts}
         onClose={() => {
           setIsGiftModalOpen(false);

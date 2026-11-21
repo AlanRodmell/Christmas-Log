@@ -16,9 +16,12 @@ export interface GiftEntry {
   updatedAt: number;
 }
 
+export type RecipientSortMode = 'alpha-asc' | 'alpha-desc' | 'custom' | 'spend-desc';
+
 export interface ChristmasLedgerData {
   recipients: Recipient[];
   gifts: GiftEntry[];
+  recipientSort?: RecipientSortMode;
 }
 
 export type AppView = 'gifts' | 'summary' | 'recipients';

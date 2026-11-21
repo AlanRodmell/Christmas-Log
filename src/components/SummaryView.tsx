@@ -38,6 +38,7 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
   onOpenAddGift,
 }) => {
   const [excludePurchased, setExcludePurchased] = useState(false);
+  const [breakdownSort, setBreakdownSort] = useState<'spend' | 'alpha'>('spend');
   const [pendingAction, setPendingAction] = useState<'clear-all' | 'reset-sample' | null>(null);
   const [crestFailed, setCrestFailed] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -105,7 +106,12 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
       };
     })
     .filter((item) => (!excludePurchased ? true : item.giftCount > 0))
-    .sort((a, b) => b.total - a.total || a.recipient.name.localeCompare(b.recipient.name));
+    .sort((a, b) =>
+      breakdownSort === 'alpha'
+        ? a.recipient.name.localeCompare(b.recipient.name, 'en-GB', { sensitivity: 'base' })
+        : b.total - a.total ||
+          a.recipient.name.localeCompare(b.recipient.name, 'en-GB', { sensitivity: 'base' })
+    );
 
   const activeRecipientsCount = recipientBreakdown.filter((r) => r.giftCount > 0).length;
   const averageGift = scopedGifts.length > 0 ? scopedTotal / scopedGifts.length : 0;
@@ -322,7 +328,7 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
           {/* Left: Per-Recipient Budget & Spend Breakdown */}
           <section className="lg:col-span-7 rounded-2xl bg-white border border-[#F0DFC8] shadow-xs overflow-hidden">
-            <div className="px-5 sm:px-6 py-4 bg-[#FFF6EC] border-b border-[#F3E5D3] flex items-baseline justify-between gap-4">
+            <div className="px-5 sm:px-6 py-4 bg-[#FFF6EC] border-b border-[#F3E5D3] flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-serif text-lg font-bold text-[#1D2B24]">
                   {excludePurchased ? 'Unpurchased Spend by Recipient' : 'Budget vs Spend by Recipient'}
@@ -331,9 +337,36 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
                   Progress bar tracks each person against their individual budget.
                 </p>
               </div>
-              <span className="text-xs font-semibold text-[#5A6D62] tabular-nums shrink-0">
-                {recipientBreakdown.length} {recipientBreakdown.length === 1 ? 'person' : 'people'}
-              </span>
+              <div
+                role="group"
+                aria-label="Sort recipient breakdown"
+                className="inline-flex items-center p-0.5 rounded-lg bg-[#EFE2D0] shrink-0"
+              >
+                <button
+                  type="button"
+                  onClick={() => setBreakdownSort('spend')}
+                  aria-pressed={breakdownSort === 'spend'}
+                  className={`min-h-[34px] px-2.5 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap ${
+                    breakdownSort === 'spend'
+                      ? 'bg-white text-[#C61D2B] shadow-xs'
+                      : 'text-[#6A5A48] hover:text-[#1D2B24]'
+                  }`}
+                >
+                  By Spend
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBreakdownSort('alpha')}
+                  aria-pressed={breakdownSort === 'alpha'}
+                  className={`min-h-[34px] px-2.5 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap ${
+                    breakdownSort === 'alpha'
+                      ? 'bg-white text-[#157A4B] shadow-xs'
+                      : 'text-[#6A5A48] hover:text-[#1D2B24]'
+                  }`}
+                >
+                  A–Z
+                </button>
+              </div>
             </div>
 
             <div className="px-5 sm:px-6 divide-y divide-[#F4E9DA]">

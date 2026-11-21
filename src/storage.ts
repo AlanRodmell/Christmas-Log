@@ -1,4 +1,38 @@
-import { ChristmasLedgerData, GiftEntry, Recipient } from './types';
+import { ChristmasLedgerData, GiftEntry, Recipient, RecipientSortMode } from './types';
+
+const VALID_RECIPIENT_SORTS: readonly RecipientSortMode[] = [
+  'alpha-asc',
+  'alpha-desc',
+  'custom',
+  'spend-desc',
+];
+
+export function sortRecipientsList(
+  recipients: Recipient[],
+  mode: RecipientSortMode,
+  spendByRecipient?: Map<string, number>
+): Recipient[] {
+  const copy = [...recipients];
+  switch (mode) {
+    case 'alpha-asc':
+      return copy.sort((a, b) =>
+        a.name.localeCompare(b.name, 'en-GB', { sensitivity: 'base' })
+      );
+    case 'alpha-desc':
+      return copy.sort((a, b) =>
+        b.name.localeCompare(a.name, 'en-GB', { sensitivity: 'base' })
+      );
+    case 'spend-desc':
+      return copy.sort((a, b) => {
+        const diff = (spendByRecipient?.get(b.id) ?? 0) - (spendByRecipient?.get(a.id) ?? 0);
+        if (diff !== 0) return diff;
+        return a.name.localeCompare(b.name, 'en-GB', { sensitivity: 'base' });
+      });
+    case 'custom':
+    default:
+      return copy;
+  }
+}
 
 export const STORAGE_KEY = 'christmas_log_uk_v1';
 
@@ -78,6 +112,7 @@ export function getStarterData(): ChristmasLedgerData {
   return {
     recipients,
     gifts,
+    recipientSort: 'alpha-asc',
   };
 }
 
@@ -124,7 +159,12 @@ export function loadLedgerData(): ChristmasLedgerData {
             purchased: Boolean(g.purchased),
           }))
       : [];
-    return { recipients, gifts };
+    const recipientSort: RecipientSortMode = VALID_RECIPIENT_SORTS.includes(
+      parsed.recipientSort as RecipientSortMode
+    )
+      ? (parsed.recipientSort as RecipientSortMode)
+      : 'alpha-asc';
+    return { recipients, gifts, recipientSort };
   } catch {
     return getStarterData();
   }

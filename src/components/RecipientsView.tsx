@@ -1,12 +1,28 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Check, ChevronRight, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { GiftEntry, Recipient } from '../types';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowDownAZ,
+  ArrowUp,
+  Check,
+  ChevronRight,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { GiftEntry, Recipient, RecipientSortMode } from '../types';
 import { formatCurrency, getRecipientSealColor } from '../storage';
 import { RecipientBauble } from './RecipientBauble';
 
 interface RecipientsViewProps {
   recipients: Recipient[];
+  recipientIndexMap: Map<string, number>;
   gifts: GiftEntry[];
+  recipientSort: RecipientSortMode;
+  onChangeRecipientSort: (mode: RecipientSortMode) => void;
+  onSortRecipientsAlphabetically: () => void;
+  onMoveRecipient: (id: string, direction: 'up' | 'down') => void;
   onAddRecipient: (name: string, budget: number, note?: string) => void;
   onUpdateRecipient: (id: string, name: string, budget: number, note?: string) => void;
   onDeleteRecipient: (id: string) => void;
@@ -18,7 +34,12 @@ const JOLLY_SNOWMAN_PATH = `${import.meta.env.BASE_URL}src/assets/images/jolly_f
 
 export const RecipientsView: React.FC<RecipientsViewProps> = ({
   recipients,
+  recipientIndexMap,
   gifts,
+  recipientSort,
+  onChangeRecipientSort,
+  onSortRecipientsAlphabetically,
+  onMoveRecipient,
   onAddRecipient,
   onUpdateRecipient,
   onDeleteRecipient,
@@ -204,13 +225,43 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
 
         {/* Recipient Directory */}
         <section className="lg:col-span-8 rounded-2xl bg-white border border-[#F0DFC8] shadow-xs overflow-hidden">
-          <div className="px-5 sm:px-6 py-4 bg-[#FFF6EC] border-b border-[#F3E5D3] flex items-center justify-between">
-            <h2 className="font-serif text-lg font-bold text-[#1D2B24]">
-              Your Christmas List
-            </h2>
-            <span className="text-xs font-semibold text-[#7A6855] tabular-nums">
-              {recipients.length} {recipients.length === 1 ? 'recipient' : 'recipients'}
-            </span>
+          <div className="px-5 sm:px-6 py-4 bg-[#FFF6EC] border-b border-[#F3E5D3] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="font-serif text-lg font-bold text-[#1D2B24]">
+                Your Christmas List
+              </h2>
+              <p className="text-xs text-[#7A6855] tabular-nums">
+                {recipients.length} {recipients.length === 1 ? 'person' : 'people'} · Sort alphabetically or organise your own order
+              </p>
+            </div>
+
+            {recipients.length > 1 && (
+              <div className="flex items-center gap-2 shrink-0">
+                <select
+                  aria-label="Sort people"
+                  value={recipientSort}
+                  onChange={(e) => onChangeRecipientSort(e.target.value as RecipientSortMode)}
+                  className="min-h-[40px] px-3 py-1.5 rounded-xl bg-white border border-[#E5D3BC] text-xs font-semibold text-[#1D2B24] focus:outline-none focus:border-[#157A4B]"
+                >
+                  <option value="alpha-asc">Name (A–Z)</option>
+                  <option value="alpha-desc">Name (Z–A)</option>
+                  <option value="custom">Custom order</option>
+                  <option value="spend-desc">Most spent</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={onSortRecipientsAlphabetically}
+                  className={`inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
+                    recipientSort === 'alpha-asc'
+                      ? 'bg-[#157A4B] border-[#157A4B] text-white'
+                      : 'bg-white border-[#E5D3BC] text-[#157A4B] hover:bg-[#F3FBF6]'
+                  }`}
+                >
+                  <ArrowDownAZ className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>Sort A–Z</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {recipients.length === 0 ? (
@@ -222,7 +273,7 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
           ) : (
             <div className="divide-y divide-[#F4E9DA]">
               {recipients.map((recipient, idx) => {
-                const seal = getRecipientSealColor(idx);
+                const seal = getRecipientSealColor(recipientIndexMap.get(recipient.id) ?? idx);
                 const personGifts = gifts.filter((g) => g.recipientId === recipient.id);
                 const subtotal = personGifts.reduce((sum, g) => sum + g.estimatedCost, 0);
                 const boughtCount = personGifts.filter((g) => g.purchased).length;
@@ -322,7 +373,7 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-2.5">
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between gap-3">
                           <button
                             type="button"
@@ -335,7 +386,7 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
                               text={seal.text}
                               size="lg"
                             />
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-baseline gap-2">
                                 <span className="text-[16px] font-semibold text-[#1D2B24] group-hover:text-[#C61D2B] transition-colors truncate">
                                   {recipient.name}
@@ -368,43 +419,11 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
                                 </span>
                               </p>
                             </div>
+                            <ChevronRight
+                              className="w-4 h-4 text-[#B09D87] group-hover:text-[#C61D2B] shrink-0 transition-transform group-hover:translate-x-0.5"
+                              aria-hidden="true"
+                            />
                           </button>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => onAddGiftForRecipient(recipient.id)}
-                              aria-label={`Log gift for ${recipient.name}`}
-                              className="inline-flex items-center gap-1 min-h-[44px] px-3 rounded-xl text-xs font-semibold text-[#C61D2B] hover:bg-[#C61D2B]/10 transition-colors whitespace-nowrap"
-                            >
-                              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span className="hidden sm:inline">Log Gift</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => startEdit(recipient)}
-                              aria-label={`Edit ${recipient.name} and budget`}
-                              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl text-[#5A6D62] hover:text-[#157A4B] hover:bg-[#157A4B]/10 transition-colors"
-                            >
-                              <Pencil className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(recipient.id)}
-                              aria-label={`Delete ${recipient.name}`}
-                              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl text-[#5A6D62] hover:text-[#C61D2B] hover:bg-[#C61D2B]/10 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onViewRecipientGifts(recipient.id)}
-                              aria-label={`View gifts for ${recipient.name}`}
-                              className="hidden sm:inline-flex items-center justify-center min-w-[40px] min-h-[44px] rounded-xl text-[#B09D87] hover:text-[#C61D2B]"
-                            >
-                              <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                          </div>
                         </div>
 
                         <div className="h-2 w-full rounded-full bg-[#F5ECDF] overflow-hidden">
@@ -415,6 +434,58 @@ export const RecipientsView: React.FC<RecipientsViewProps> = ({
                               backgroundColor: isOver ? '#C61D2B' : '#157A4B',
                             }}
                           />
+                        </div>
+
+                        {/* Organise (Move Up / Down) & Row Actions */}
+                        <div className="flex items-center justify-between gap-2 pt-0.5">
+                          <div className="flex items-center gap-1" role="group" aria-label={`Reorder ${recipient.name}`}>
+                            <button
+                              type="button"
+                              onClick={() => onMoveRecipient(recipient.id, 'up')}
+                              disabled={idx === 0}
+                              aria-label={`Move ${recipient.name} up`}
+                              className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-xl border border-[#EFE2D0] text-[#5A6D62] hover:text-[#157A4B] hover:bg-[#F3FBF6] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[#5A6D62] transition-colors"
+                            >
+                              <ArrowUp className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onMoveRecipient(recipient.id, 'down')}
+                              disabled={idx === recipients.length - 1}
+                              aria-label={`Move ${recipient.name} down`}
+                              className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-xl border border-[#EFE2D0] text-[#5A6D62] hover:text-[#157A4B] hover:bg-[#F3FBF6] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[#5A6D62] transition-colors"
+                            >
+                              <ArrowDown className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onAddGiftForRecipient(recipient.id)}
+                              aria-label={`Log gift for ${recipient.name}`}
+                              className="inline-flex items-center gap-1 min-h-[40px] px-3 rounded-xl text-xs font-semibold text-[#C61D2B] hover:bg-[#C61D2B]/10 transition-colors whitespace-nowrap"
+                            >
+                              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Log Gift</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => startEdit(recipient)}
+                              aria-label={`Edit ${recipient.name} and budget`}
+                              className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-xl text-[#5A6D62] hover:text-[#157A4B] hover:bg-[#157A4B]/10 transition-colors"
+                            >
+                              <Pencil className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(recipient.id)}
+                              aria-label={`Delete ${recipient.name}`}
+                              className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-xl text-[#5A6D62] hover:text-[#C61D2B] hover:bg-[#C61D2B]/10 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
